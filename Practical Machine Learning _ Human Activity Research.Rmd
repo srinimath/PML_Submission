@@ -1,0 +1,104 @@
+---
+title: "Practical Machine Learning - Human Activity Research"
+output: html_document
+---
+##Introduction  
+This study is conducted as a part of Course Project "Practical Machine Learning". 
+
+###Background  
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+###Data  
+The data for this project come from this source: [http://groupware.les.inf.puc-rio.br/har]. The training data for this project are available [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv) and the test data [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv).
+
+###Project Goal
+The goal of this project is to predict the manner in which they did the exercise. This corresponds to the "classe" variable in the training set.
+
+##Analysis
+###Data Exploration and Cleansing
+Here we will explore the data and cleanse it to run our models on train data. Assuming the data has been downloaded to the working directory into **train.csv** and **test.csv** respectively: 
+```{r,echo=TRUE,warning=FALSE,message=FALSE}
+#loading all required libraries
+library(caret);library(rpart);library(randomForest);library(e1071)
+#set seed
+set.seed(98765)
+#reading data assuming data has been downloaded in your working directory 
+setwd("./")
+trainData=read.csv("./train.csv");
+testData=read.csv("./test.csv");
+dim(trainData)
+dim(testData)
+table(trainData$classe)
+```
+So, ```trainData``` has 19622 observations and 160 variables and ```testData``` has ofcourse same variable count and 20 observations. Running ```str(trainingData)``` will show you a lot of NAs. Apart this dataset has descriptive fields and may have zero variability columns. Cleansing the data below to remove these:
+```{r,echo=TRUE,warning=FALSE,message=FALSE}
+#first, removing near zero variance columns 
+nzVarCol=nearZeroVar(trainData)
+trainData=trainData[,-nzVarCol]
+#then, identify and remove the columns that are descriptive only
+descCol= c("X", "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window",
+           "num_window")
+#identify the ones with more than 40% nas and empty values
+countEmpty=sapply(trainData,function(x) sum((is.na(x)| x=="")))
+emptyCol=names(countEmpty[countEmpty>0.4*length(trainData$classe)])
+#remove all the above identified variables
+trainData=trainData[!(colnames(trainData) %in% c(descCol,emptyCol))]
+dim(trainData)
+```
+
+###Cross Validation and Model Selection
+Now we are left with 53 variables on ```trainData```.Before fitting models on this dataset, we will split this dataset into ```trainingData``` and ```validateData``` to ensure we can validate our model on a small daatset before applying it on ```testData```.
+```{r,echo=TRUE,warning=FALSE,message=FALSE}
+#partition trainData to create new train and validation datasets
+inTrain <- createDataPartition(y=trainData$classe, p=0.80, list=FALSE)
+trainingData <- trainData[inTrain, ]
+validateData <- trainData[-inTrain, ]
+dim(trainingData); dim(validateData)
+```
+Our approach hereon will be to train ```trainingData``` through various models and validate it against ```validateData``` dataset and pick the model that best fits and run it against the ```testData``` model. We will be considering Decision Trees, Random Forest, Linear Discriminant Analysis (LDA) models.
+```{r,echo=TRUE,warning=FALSE,message=FALSE}
+#random forest
+fitRF=randomForest(classe~.,data=trainingData, ntree =30, importance = TRUE)
+cmRF=confusionMatrix(validateData$classe,predict(fitRF,newdata=validateData))
+
+#decision tree
+fitDT=train(classe~.,method = "rpart", data=trainingData)
+cmDT=confusionMatrix(validateData$classe,predict(fitDT,newdata=validateData))
+
+#LDA
+fitLDA=train(classe~.,method = "lda", data=trainingData)
+cmLDA=confusionMatrix(validateData$classe,predict(fitLDA,newdata=validateData))
+
+#NB
+fitNB=naiveBayes(classe~., data=trainingData)
+cmNB=confusionMatrix(validateData$classe,predict(fitNB,newdata=validateData))
+
+#analyze results
+result=rbind(cmRF$overall, cmDT$overall, cmLDA$overall, cmNB$overall)
+rownames(result)=c("Random Forest","Decision Tree","LDA","Naive Bayes")
+result
+```
+
+COmparing various models, we see tha random forest predicts the most accurate results on cross validation (with over 99.5% accuracy), which implies the out of sample error to be less than 0.5% which equals to 1 in 200 sample count predicting wrong through random forest.
+
+##Test Set Prediction
+Using random forest model, the prediction for test data will be:
+```{r,echo=TRUE,warning=FALSE,message=FALSE}
+testPredict=predict(fitRF,testData)
+testPredict
+```
+As the size of the test data is 20 and as we have seen the out of sample error of random forest being 1 in 200, we can expect the prediction of classe on testData to have 1 or no errors.
+
+##Submission
+```{r,echo=TRUE,warning=FALSE,message=FALSE}
+#files for submission
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(testPredict)
+```
